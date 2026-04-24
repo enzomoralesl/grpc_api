@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="CopilotDiffPersistence">
+    <option name="pendingDiffs">
+      <map>
+        <entry key="/.env (snapshot).env">
+          <value>
+            <PendingDiffInfo>
+              <option name="filePath" value="/.env (snapshot).env" />
+              <option name="originalContent" value="DATABASE_URL=postgres://your_username:your_password@your_host:your_port/your_database&#10;JWT_SECRET=your_secure_jwt_secret&#10;JWT_EXP_HOURS=24&#10;GRPC_ADDR=0.0.0.0:50051&#10;RUST_LOG=info&#10;" />
+              <option name="updatedContent" value="DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/grpc_api&#10;JWT_SECRET=your_secure_jwt_secret&#10;JWT_EXP_HOURS=24&#10;GRPC_ADDR=127.0.0.1:50051&#10;RUST_LOG=info" />
+            </PendingDiffInfo>
+          </value>
+        </entry>
+      </map>
+    </option>
+  </component>
+</project>

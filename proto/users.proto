@@ -1,0 +1,74 @@
+syntax = "proto3";
+
+package users;
+
+message User {
+  string id = 1;
+  string email = 2;
+  string full_name = 3;
+  string created_at = 4;
+  string updated_at = 5;
+  string role = 6;
+}
+
+message CreateUserRequest {
+  string email = 1;
+  string full_name = 2;
+  string password = 3;
+}
+
+message CreateUserResponse {
+  User user = 1;
+}
+
+message LoginRequest {
+  string email = 1;
+  string password = 2;
+}
+
+message LoginResponse {
+  string token = 1;
+}
+
+message GetUserRequest {
+  string id = 1;
+}
+
+message GetUserResponse {
+  User user = 1;
+}
+
+message ListUsersRequest {}
+
+message ListUsersResponse {
+  repeated User users = 1;
+}
+
+message UpdateUserRequest {
+  string id = 1;
+  string email = 2;
+  string full_name = 3;
+  string password = 4;
+  bool update_password = 5;
+}
+
+message UpdateUserResponse {
+  User user = 1;
+}
+
+message DeleteUserRequest {
+  string id = 1;
+}
+
+message DeleteUserResponse {
+  bool deleted = 1;
+}
+
+service UsersService {
+  rpc CreateUser(CreateUserRequest) returns (CreateUserResponse);
+  rpc Login(LoginRequest) returns (LoginResponse);
+  rpc GetUser(GetUserRequest) returns (GetUserResponse);
+  rpc ListUsers(ListUsersRequest) returns (ListUsersResponse);
+  rpc UpdateUser(UpdateUserRequest) returns (UpdateUserResponse);
+  rpc DeleteUser(DeleteUserRequest) returns (DeleteUserResponse);
+}

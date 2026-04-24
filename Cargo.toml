@@ -1,0 +1,24 @@
+[package]
+name = "grpc_api"
+version = "0.1.0"
+edition = "2021"
+default-run = "grpc_api"
+
+[dependencies]
+argon2 = "0.5"
+chrono = { version = "0.4", features = ["clock"] }
+dotenvy = "0.15"
+jsonwebtoken = "9"
+prost = "0.12"
+serde = { version = "1", features = ["derive"] }
+sqlx = { version = "0.8.6", features = ["runtime-tokio-rustls", "postgres", "uuid", "chrono", "migrate", "macros"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "time"] }
+tonic = { version = "0.11", features = ["transport"] }
+tonic-reflection = "0.11"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+uuid = { version = "1", features = ["v4"] }
+
+[build-dependencies]
+protoc-bin-vendored = "3"
+tonic-build = "0.11"
