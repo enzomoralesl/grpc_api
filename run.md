@@ -14,30 +14,12 @@ This document explains how to run the users CRUD gRPC API locally with Cargo, wi
 - Docker and Docker Compose
 - Optional: `grpcurl`
 
-## 1) Run Locally with Cargo
+## 1) Run Locally with Cargo and Docker DB
 
 ### Start Postgres
 ```bash
 docker compose up -d db
 ```
-
-If you changed Postgres image/locale settings or hit `sqlx` protocol errors related to non-UTF-8 messages, recreate the database volume once:
-```bash
-docker compose down -v
-docker compose up -d db
-```
-
-### Configure environment
-```bash
-cp .env.example .env
-```
-
-Default local values in `.env`:
-- `DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/grpc_api`
-- `JWT_SECRET=change_me_in_prod`
-- `JWT_EXP_HOURS=24`
-- `GRPC_ADDR=0.0.0.0:50051`
-- `RUST_LOG=info`
 
 ### Run the API
 ```bash
@@ -46,7 +28,7 @@ cargo run
 
 The server starts on `0.0.0.0:50051` and runs migrations automatically.
 
-## 2) Run with Docker Compose
+## 2) Run virtually with Docker
 
 This starts Postgres and the API in containers.
 
@@ -56,7 +38,7 @@ docker compose up --build
 
 The gRPC API is available on `localhost:50051`.
 
-## 3) Run with Docker image only
+## 3) Run cargo with Docker using local Postgres
 
 If Postgres is already running elsewhere:
 
@@ -64,7 +46,7 @@ If Postgres is already running elsewhere:
 docker build -t grpc-api .
 docker run --rm \
   -p 50051:50051 \
-  -e DATABASE_URL=postgres://postgres:postgres@host.docker.internal:5432/grpc_api \
+  -e DATABASE_URL=postgres://postgres:postgres@host.docker.internal:5432/grpc_api_db \
   -e JWT_SECRET=change_me_in_prod \
   -e JWT_EXP_HOURS=24 \
   -e GRPC_ADDR=0.0.0.0:50051 \
@@ -156,24 +138,9 @@ docker compose up -d db
 cargo test
 ```
 
-Optional explicit test DB URL:
-```bash
-TEST_DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/grpc_api cargo test
-```
-
 Test coverage includes:
 - first user gets admin role
 - second user gets user role
 - admin can list users
 - user cannot list users
 - get/update/delete self flow
-
-## 7) Stop services
-```bash
-docker compose down
-```
-
-To also remove Postgres data volume:
-```bash
-docker compose down -v
-```

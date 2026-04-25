@@ -3,21 +3,35 @@ services:
     image: postgres:16
     command: ["postgres", "-c", "lc_messages=C", "-c", "client_encoding=UTF8"]
     environment:
-      POSTGRES_DB: grpc_api
+      POSTGRES_DB: grpc_api_db
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
       POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C.UTF-8 --lc-messages=C"
     ports:
       - "5433:5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d grpc_api"]
+      test: ["CMD-SHELL", "pg_isready -U postgres -d grpc_api_db"]
       interval: 5s
       timeout: 5s
       retries: 10
     volumes:
       - postgres_data:/var/lib/postgresql/data
 
-
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      DATABASE_URL: postgres://postgres:postgres@db:5432/grpc_api_db
+      JWT_SECRET: change_me_in_prod
+      JWT_EXP_HOURS: 24
+      GRPC_ADDR: 0.0.0.0:50051
+      RUST_LOG: info
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "50051:50051"
 
 volumes:
   postgres_data:

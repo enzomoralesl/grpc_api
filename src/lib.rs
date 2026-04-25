@@ -41,7 +41,7 @@ pub struct AppConfig {
 impl AppConfig {
     pub fn from_env() -> Self {
         let database_url = env::var("DATABASE_URL")
-            .unwrap_or_else(|_| "postgres://postgres:postgres@127.0.0.1:5432/grpc_api".to_string());
+            .unwrap_or_else(|_| "postgres://postgres:postgres@127.0.0.1:5433/grpc_api_db".to_string());
         let jwt_secret =
             env::var("JWT_SECRET").unwrap_or_else(|_| "change_me_in_prod".to_string());
         let jwt_exp_hours = env::var("JWT_EXP_HOURS")

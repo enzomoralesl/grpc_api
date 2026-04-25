@@ -46,7 +46,7 @@ async fn users_crud_and_admin_enforcement_flow() -> Result<(), Box<dyn Error>> {
 
     let database_url = env::var("TEST_DATABASE_URL")
         .or_else(|_| env::var("DATABASE_URL"))
-        .unwrap_or_else(|_| "postgres://postgres:postgres@127.0.0.1:5432/grpc_api".to_string());
+        .unwrap_or_else(|_| "postgres://postgres:postgres@127.0.0.1:5433/grpc_api_db".to_string());
 
     let pool = create_pool(&database_url).await?;
     run_migrations(&pool).await?;

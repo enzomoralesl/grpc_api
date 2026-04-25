@@ -2,7 +2,7 @@ FROM rust:1.88-alpine AS builder
 
 WORKDIR /app
 
-RUN apk add --no-cache musl-dev openssl-dev pkgconfig
+RUN apk add --no-cache musl-dev openssl-dev pkgconfig protoc protobuf-dev
 
 # Pre-build dependencies to improve cache hits.
 COPY Cargo.toml ./
