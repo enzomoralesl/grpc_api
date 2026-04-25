@@ -1,3 +1,5 @@
+#![allow(clippy::result_large_err)]
+
 use std::{env, net::SocketAddr};
 
 use argon2::{
@@ -115,6 +117,10 @@ struct UserRow {
     password_hash: String,
     created_at: chrono::DateTime<Utc>,
     updated_at: chrono::DateTime<Utc>,
+}
+
+impl UserRow {
+    const SELECT_FIELDS: &'static str = "id, email, full_name, role, password_hash, created_at, updated_at";
 }
 
 #[derive(Clone)]
@@ -256,7 +262,7 @@ impl UsersService for UsersGrpcService {
         let role = if users_count == 0 { ROLE_ADMIN } else { ROLE_USER };
 
         let row = sqlx::query_as::<_, UserRow>(
-            "INSERT INTO users (id, email, full_name, role, password_hash) VALUES ($1, $2, $3, $4, $5) RETURNING id, email, full_name, role, password_hash, created_at, updated_at",
+            &format!("INSERT INTO users (id, email, full_name, role, password_hash) VALUES ($1, $2, $3, $4, $5) RETURNING {}", UserRow::SELECT_FIELDS),
         )
         .bind(id)
         .bind(email)
@@ -293,9 +299,10 @@ impl UsersService for UsersGrpcService {
 
         let email = req.email.trim().to_lowercase();
 
-        let user = sqlx::query_as::<_, UserRow>(
-            "SELECT id, email, full_name, role, password_hash, created_at, updated_at FROM users WHERE email = $1",
-        )
+        let user = sqlx::query_as::<_, UserRow>(&format!(
+            "SELECT {} FROM users WHERE email = $1",
+            UserRow::SELECT_FIELDS
+        ))
         .bind(email)
         .fetch_optional(&self.pool)
         .await
@@ -322,9 +329,10 @@ impl UsersService for UsersGrpcService {
             Uuid::parse_str(&req.id).map_err(|_| Status::invalid_argument("id must be a valid UUID"))?;
         Self::ensure_self_access(auth_user, user_id)?;
 
-        let row = sqlx::query_as::<_, UserRow>(
-            "SELECT id, email, full_name, role, password_hash, created_at, updated_at FROM users WHERE id = $1",
-        )
+        let row = sqlx::query_as::<_, UserRow>(&format!(
+            "SELECT {} FROM users WHERE id = $1",
+            UserRow::SELECT_FIELDS
+        ))
         .bind(user_id)
         .fetch_optional(&self.pool)
         .await
@@ -343,9 +351,10 @@ impl UsersService for UsersGrpcService {
         let auth_user = self.auth_user_id(&request)?;
         self.ensure_admin(auth_user).await?;
 
-        let rows = sqlx::query_as::<_, UserRow>(
-            "SELECT id, email, full_name, role, password_hash, created_at, updated_at FROM users ORDER BY created_at DESC LIMIT 100",
-        )
+        let rows = sqlx::query_as::<_, UserRow>(&format!(
+            "SELECT {} FROM users ORDER BY created_at DESC LIMIT 100",
+            UserRow::SELECT_FIELDS
+        ))
         .fetch_all(&self.pool)
         .await
         .map_err(|_| Status::internal("failed to list users"))?;
@@ -365,9 +374,10 @@ impl UsersService for UsersGrpcService {
             Uuid::parse_str(&req.id).map_err(|_| Status::invalid_argument("id must be a valid UUID"))?;
         Self::ensure_self_access(auth_user, user_id)?;
 
-        let existing = sqlx::query_as::<_, UserRow>(
-            "SELECT id, email, full_name, role, password_hash, created_at, updated_at FROM users WHERE id = $1",
-        )
+        let existing = sqlx::query_as::<_, UserRow>(&format!(
+            "SELECT {} FROM users WHERE id = $1",
+            UserRow::SELECT_FIELDS
+        ))
         .bind(user_id)
         .fetch_optional(&self.pool)
         .await
@@ -402,7 +412,7 @@ impl UsersService for UsersGrpcService {
         };
 
         let row = sqlx::query_as::<_, UserRow>(
-            "UPDATE users SET email = $2, full_name = $3, password_hash = $4, updated_at = NOW() WHERE id = $1 RETURNING id, email, full_name, role, password_hash, created_at, updated_at",
+            &format!("UPDATE users SET email = $2, full_name = $3, password_hash = $4, updated_at = NOW() WHERE id = $1 RETURNING {}", UserRow::SELECT_FIELDS),
         )
         .bind(user_id)
         .bind(email)

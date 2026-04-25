@@ -3,8 +3,7 @@ use std::{error::Error, io, time::Duration};
 use grpc_api::users::users_service_client::UsersServiceClient;
 use grpc_api::users::users_service_server::UsersServiceServer;
 use grpc_api::users::{
-    CreateUserRequest, DeleteUserRequest, GetUserRequest, ListUsersRequest, LoginRequest,
-    UpdateUserRequest,
+    CreateUserRequest, ListUsersRequest, LoginRequest, UpdateUserRequest, User,
 };
 use grpc_api::{create_pool, run_migrations, JwtManager, UsersGrpcService};
 use testcontainers::runners::AsyncRunner;
@@ -48,6 +47,26 @@ struct TestContext {
     _server_task: tokio::task::JoinHandle<Result<(), tonic::transport::Error>>,
 }
 
+impl TestContext {
+    pub async fn create_and_login_user(&mut self, prefix: &str) -> Result<(User, String), Box<dyn Error>> {
+        let email = format!("{prefix}@example.com");
+        let password = "password123".to_string();
+
+        let user = self.client.create_user(Request::new(CreateUserRequest {
+            email: email.clone(),
+            full_name: format!("{prefix} User"),
+            password: password.clone(),
+        })).await?.into_inner().user.unwrap();
+
+        let token = self.client.login(Request::new(LoginRequest {
+            email,
+            password,
+        })).await?.into_inner().token;
+
+        Ok((user, token))
+    }
+}
+
 async fn setup_test_context() -> Result<TestContext, Box<dyn Error>> {
     dotenvy::dotenv().ok();
 
@@ -88,22 +107,8 @@ async fn test_user_cannot_list_users_permission_denied() -> Result<(), Box<dyn E
     let mut ctx = setup_test_context().await?;
 
     // The first user created in the system often becomes admin, but let's assume we create an admin first, then a regular user.
-    let _admin = ctx.client.create_user(Request::new(CreateUserRequest {
-        email: "admin@example.com".to_string(),
-        full_name: "Admin User".to_string(),
-        password: "password123".to_string(),
-    })).await?;
-
-    let user = ctx.client.create_user(Request::new(CreateUserRequest {
-        email: "user@example.com".to_string(),
-        full_name: "Regular User".to_string(),
-        password: "password123".to_string(),
-    })).await?.into_inner().user.unwrap();
-
-    let user_token = ctx.client.login(Request::new(LoginRequest {
-        email: "user@example.com".to_string(),
-        password: "password123".to_string(),
-    })).await?.into_inner().token;
+    let _admin = ctx.create_and_login_user("admin").await?;
+    let (_user, user_token) = ctx.create_and_login_user("regular").await?;
 
     let res = ctx.client.list_users(with_auth(ListUsersRequest {}, &user_token)?).await;
     
@@ -117,16 +122,7 @@ async fn test_user_cannot_list_users_permission_denied() -> Result<(), Box<dyn E
 async fn test_admin_can_list_users() -> Result<(), Box<dyn Error>> {
     let mut ctx = setup_test_context().await?;
 
-    let admin = ctx.client.create_user(Request::new(CreateUserRequest {
-        email: "admin@example.com".to_string(),
-        full_name: "Admin User".to_string(),
-        password: "password123".to_string(),
-    })).await?.into_inner().user.unwrap();
-
-    let admin_token = ctx.client.login(Request::new(LoginRequest {
-        email: "admin@example.com".to_string(),
-        password: "password123".to_string(),
-    })).await?.into_inner().token;
+    let (admin, admin_token) = ctx.create_and_login_user("admin").await?;
 
     let res = ctx.client.list_users(with_auth(ListUsersRequest {}, &admin_token)?).await;
     
@@ -142,23 +138,8 @@ async fn test_admin_can_list_users() -> Result<(), Box<dyn Error>> {
 async fn test_user_can_update_own_profile() -> Result<(), Box<dyn Error>> {
     let mut ctx = setup_test_context().await?;
 
-    // Setup an admin so the next one is a regular user
-    ctx.client.create_user(Request::new(CreateUserRequest {
-        email: "admin@example.com".to_string(),
-        full_name: "Admin User".to_string(),
-        password: "password123".to_string(),
-    })).await?;
-
-    let user = ctx.client.create_user(Request::new(CreateUserRequest {
-        email: "user@example.com".to_string(),
-        full_name: "Regular User".to_string(),
-        password: "password123".to_string(),
-    })).await?.into_inner().user.unwrap();
-
-    let user_token = ctx.client.login(Request::new(LoginRequest {
-        email: "user@example.com".to_string(),
-        password: "password123".to_string(),
-    })).await?.into_inner().token;
+    let _admin = ctx.create_and_login_user("admin").await?;
+    let (user, user_token) = ctx.create_and_login_user("regular").await?;
 
     let res = ctx.client.update_user(with_auth(UpdateUserRequest {
         id: user.id.clone(),
@@ -179,24 +160,8 @@ async fn test_user_can_update_own_profile() -> Result<(), Box<dyn Error>> {
 async fn test_user_cannot_update_other_profiles() -> Result<(), Box<dyn Error>> {
     let mut ctx = setup_test_context().await?;
 
-    // Create admin (user 1)
-    let admin = ctx.client.create_user(Request::new(CreateUserRequest {
-        email: "admin@example.com".to_string(),
-        full_name: "Admin User".to_string(),
-        password: "password123".to_string(),
-    })).await?.into_inner().user.unwrap();
-
-    // Create regular user (user 2)
-    let _user = ctx.client.create_user(Request::new(CreateUserRequest {
-        email: "user@example.com".to_string(),
-        full_name: "Regular User".to_string(),
-        password: "password123".to_string(),
-    })).await?.into_inner().user.unwrap();
-
-    let user_token = ctx.client.login(Request::new(LoginRequest {
-        email: "user@example.com".to_string(),
-        password: "password123".to_string(),
-    })).await?.into_inner().token;
+    let (admin, _) = ctx.create_and_login_user("admin").await?;
+    let (_, user_token) = ctx.create_and_login_user("regular").await?;
 
     // Try to update admin's profile with regular user's token
     let res = ctx.client.update_user(with_auth(UpdateUserRequest {

@@ -144,3 +144,8 @@ Test coverage includes:
 - admin can list users
 - user cannot list users
 - get/update/delete self flow
+
+### Delete database user (Force Clean Up)
+```bash
+docker exec -it grpc_api-db-1 psql -U postgres -d grpc_api_db -c "TRUNCATE TABLE users;"
+```
