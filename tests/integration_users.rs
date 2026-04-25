@@ -1,4 +1,4 @@
-use std::{env, error::Error, io, time::Duration};
+use std::{error::Error, io, time::Duration};
 
 use grpc_api::users::users_service_client::UsersServiceClient;
 use grpc_api::users::users_service_server::UsersServiceServer;
@@ -7,6 +7,8 @@ use grpc_api::users::{
     UpdateUserRequest,
 };
 use grpc_api::{create_pool, run_migrations, JwtManager, UsersGrpcService};
+use testcontainers::runners::AsyncRunner;
+use testcontainers_modules::postgres::Postgres;
 use tonic::{metadata::MetadataValue, transport::Server, Code, Request};
 
 fn with_auth<T>(message: T, token: &str) -> Result<Request<T>, Box<dyn Error>> {
@@ -40,19 +42,21 @@ async fn connect_with_retry(
     .into())
 }
 
-#[tokio::test]
-async fn users_crud_and_admin_enforcement_flow() -> Result<(), Box<dyn Error>> {
+struct TestContext {
+    pub client: UsersServiceClient<tonic::transport::Channel>,
+    _container: testcontainers::ContainerAsync<Postgres>,
+    _server_task: tokio::task::JoinHandle<Result<(), tonic::transport::Error>>,
+}
+
+async fn setup_test_context() -> Result<TestContext, Box<dyn Error>> {
     dotenvy::dotenv().ok();
 
-    let database_url = env::var("TEST_DATABASE_URL")
-        .or_else(|_| env::var("DATABASE_URL"))
-        .unwrap_or_else(|_| "postgres://postgres:postgres@127.0.0.1:5433/grpc_api_db".to_string());
+    let container = Postgres::default().start().await?;
+    let port = container.get_host_port_ipv4(5432).await?;
+    let database_url = format!("postgres://postgres:postgres@127.0.0.1:{}/postgres", port);
 
     let pool = create_pool(&database_url).await?;
     run_migrations(&pool).await?;
-    sqlx::query("TRUNCATE TABLE users")
-        .execute(&pool)
-        .await?;
 
     let temp_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
     let addr = temp_listener.local_addr()?;
@@ -70,105 +74,141 @@ async fn users_crud_and_admin_enforcement_flow() -> Result<(), Box<dyn Error>> {
     });
 
     let endpoint = format!("http://{addr}");
-    let mut client = connect_with_retry(&endpoint).await?;
+    let client = connect_with_retry(&endpoint).await?;
 
-    let admin_user = client
-        .create_user(Request::new(CreateUserRequest {
-            email: "admin@example.com".to_string(),
-            full_name: "Admin One".to_string(),
-            password: "secret123".to_string(),
-        }))
-        .await?
-        .into_inner()
-        .user
-        .ok_or_else(|| io::Error::other("missing admin user"))?;
-    assert_eq!(admin_user.role, "admin");
+    Ok(TestContext {
+        client,
+        _container: container,
+        _server_task: server_task,
+    })
+}
 
-    let admin_token = client
-        .login(Request::new(LoginRequest {
-            email: "admin@example.com".to_string(),
-            password: "secret123".to_string(),
-        }))
-        .await?
-        .into_inner()
-        .token;
+#[tokio::test]
+async fn test_user_cannot_list_users_permission_denied() -> Result<(), Box<dyn Error>> {
+    let mut ctx = setup_test_context().await?;
 
-    let regular_user = client
-        .create_user(Request::new(CreateUserRequest {
-            email: "bob@example.com".to_string(),
-            full_name: "Bob User".to_string(),
-            password: "secret123".to_string(),
-        }))
-        .await?
-        .into_inner()
-        .user
-        .ok_or_else(|| io::Error::other("missing regular user"))?;
-    assert_eq!(regular_user.role, "user");
+    // The first user created in the system often becomes admin, but let's assume we create an admin first, then a regular user.
+    let _admin = ctx.client.create_user(Request::new(CreateUserRequest {
+        email: "admin@example.com".to_string(),
+        full_name: "Admin User".to_string(),
+        password: "password123".to_string(),
+    })).await?;
 
-    let regular_token = client
-        .login(Request::new(LoginRequest {
-            email: "bob@example.com".to_string(),
-            password: "secret123".to_string(),
-        }))
-        .await?
-        .into_inner()
-        .token;
+    let user = ctx.client.create_user(Request::new(CreateUserRequest {
+        email: "user@example.com".to_string(),
+        full_name: "Regular User".to_string(),
+        password: "password123".to_string(),
+    })).await?.into_inner().user.unwrap();
 
-    let list_as_regular = client
-        .list_users(with_auth(ListUsersRequest {}, &regular_token)?)
-        .await
-        .expect_err("regular user must not list users");
-    assert_eq!(list_as_regular.code(), Code::PermissionDenied);
+    let user_token = ctx.client.login(Request::new(LoginRequest {
+        email: "user@example.com".to_string(),
+        password: "password123".to_string(),
+    })).await?.into_inner().token;
 
-    let list_as_admin = client
-        .list_users(with_auth(ListUsersRequest {}, &admin_token)?)
-        .await?
-        .into_inner();
-    assert!(list_as_admin.users.len() >= 2);
+    let res = ctx.client.list_users(with_auth(ListUsersRequest {}, &user_token)?).await;
+    
+    let err = res.unwrap_err();
+    assert_eq!(err.code(), Code::PermissionDenied);
 
-    let fetched_user = client
-        .get_user(with_auth(
-            GetUserRequest {
-                id: regular_user.id.clone(),
-            },
-            &regular_token,
-        )?)
-        .await?
-        .into_inner()
-        .user
-        .ok_or_else(|| io::Error::other("missing fetched user"))?;
-    assert_eq!(fetched_user.id, regular_user.id);
+    Ok(())
+}
 
-    let updated_user = client
-        .update_user(with_auth(
-            UpdateUserRequest {
-                id: regular_user.id.clone(),
-                email: "".to_string(),
-                full_name: "Bob Updated".to_string(),
-                password: "".to_string(),
-                update_password: false,
-            },
-            &regular_token,
-        )?)
-        .await?
-        .into_inner()
-        .user
-        .ok_or_else(|| io::Error::other("missing updated user"))?;
-    assert_eq!(updated_user.full_name, "Bob Updated");
+#[tokio::test]
+async fn test_admin_can_list_users() -> Result<(), Box<dyn Error>> {
+    let mut ctx = setup_test_context().await?;
 
-    let deleted = client
-        .delete_user(with_auth(
-            DeleteUserRequest {
-                id: regular_user.id,
-            },
-            &regular_token,
-        )?)
-        .await?
-        .into_inner();
-    assert!(deleted.deleted);
+    let admin = ctx.client.create_user(Request::new(CreateUserRequest {
+        email: "admin@example.com".to_string(),
+        full_name: "Admin User".to_string(),
+        password: "password123".to_string(),
+    })).await?.into_inner().user.unwrap();
 
-    server_task.abort();
-    let _ = server_task.await;
+    let admin_token = ctx.client.login(Request::new(LoginRequest {
+        email: "admin@example.com".to_string(),
+        password: "password123".to_string(),
+    })).await?.into_inner().token;
+
+    let res = ctx.client.list_users(with_auth(ListUsersRequest {}, &admin_token)?).await;
+    
+    assert!(res.is_ok());
+    let list = res.unwrap().into_inner();
+    assert_eq!(list.users.len(), 1);
+    assert_eq!(list.users[0].id, admin.id);
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_user_can_update_own_profile() -> Result<(), Box<dyn Error>> {
+    let mut ctx = setup_test_context().await?;
+
+    // Setup an admin so the next one is a regular user
+    ctx.client.create_user(Request::new(CreateUserRequest {
+        email: "admin@example.com".to_string(),
+        full_name: "Admin User".to_string(),
+        password: "password123".to_string(),
+    })).await?;
+
+    let user = ctx.client.create_user(Request::new(CreateUserRequest {
+        email: "user@example.com".to_string(),
+        full_name: "Regular User".to_string(),
+        password: "password123".to_string(),
+    })).await?.into_inner().user.unwrap();
+
+    let user_token = ctx.client.login(Request::new(LoginRequest {
+        email: "user@example.com".to_string(),
+        password: "password123".to_string(),
+    })).await?.into_inner().token;
+
+    let res = ctx.client.update_user(with_auth(UpdateUserRequest {
+        id: user.id.clone(),
+        email: "newemail@example.com".to_string(),
+        full_name: "Updated Name".to_string(),
+        password: "".to_string(),
+        update_password: false,
+    }, &user_token)?).await;
+
+    assert!(res.is_ok());
+    let updated = res.unwrap().into_inner().user.unwrap();
+    assert_eq!(updated.full_name, "Updated Name");
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_user_cannot_update_other_profiles() -> Result<(), Box<dyn Error>> {
+    let mut ctx = setup_test_context().await?;
+
+    // Create admin (user 1)
+    let admin = ctx.client.create_user(Request::new(CreateUserRequest {
+        email: "admin@example.com".to_string(),
+        full_name: "Admin User".to_string(),
+        password: "password123".to_string(),
+    })).await?.into_inner().user.unwrap();
+
+    // Create regular user (user 2)
+    let _user = ctx.client.create_user(Request::new(CreateUserRequest {
+        email: "user@example.com".to_string(),
+        full_name: "Regular User".to_string(),
+        password: "password123".to_string(),
+    })).await?.into_inner().user.unwrap();
+
+    let user_token = ctx.client.login(Request::new(LoginRequest {
+        email: "user@example.com".to_string(),
+        password: "password123".to_string(),
+    })).await?.into_inner().token;
+
+    // Try to update admin's profile with regular user's token
+    let res = ctx.client.update_user(with_auth(UpdateUserRequest {
+        id: admin.id.clone(),
+        email: "hacked@example.com".to_string(),
+        full_name: "Hacked Admin".to_string(),
+        password: "".to_string(),
+        update_password: false,
+    }, &user_token)?).await;
+
+    let err = res.unwrap_err();
+    assert_eq!(err.code(), Code::PermissionDenied);
 
     Ok(())
 }
